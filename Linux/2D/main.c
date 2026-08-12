@@ -33,7 +33,8 @@
 
 #define SAMPLE_RATE 44100
 #define LATENT 50000
-#define FLT_MAX  3.402823e+38
+#define FLT_MAX  3.402823e+38f
+#define FLT_MIN 0.000000000000000000000000000000000001f
 
 typedef struct{
     float speed;
@@ -1517,7 +1518,6 @@ static inline void draw_filled_circle_1_refraction(int xc, int yc, int r, uint32
     }
 }
 
-
 static inline void draw_filled_circle_2(int xc, int yc, int r, uint32_t color, short width, short height, uint32_t *framebuffer) {
     int x = 0;
     int y = r;
@@ -2048,7 +2048,7 @@ static inline bool is_colission(float *x1, float *y1, float *x2, float *y2, floa
     float smallest_axis_y = 0.0f;
 
     for (short i = 0; i < 4; i++) {
-        short next = (i + 1) % 4;
+        short next = (i + 1) & 3;
 
         float edge_x = x1[next] - x1[i];
         float edge_y = y1[next] - y1[i];
@@ -2077,7 +2077,7 @@ static inline bool is_colission(float *x1, float *y1, float *x2, float *y2, floa
     }
 
     for (short i = 0; i < 4; i++) {
-        short next = (i + 1) % 4;
+        short next = (i + 1) & 3;
 
         float edge_x = x2[next] - x2[i];
         float edge_y = y2[next] - y2[i];
@@ -2123,6 +2123,20 @@ static inline bool is_colission(float *x1, float *y1, float *x2, float *y2, floa
     *d_y = smallest_axis_y * overlap;
 
     return true;
+}
+
+static inline void is_circle_colission(float *x1, float *y1, float x2, float y2, float r1, float r2){
+    float x = (x2 - *x1);
+    float y = (y2 - *y1);
+    float lenght = sqrtf(x * x + y * y) + FLT_MIN;
+
+    if (lenght <= r1 + r2){
+        float len = (r1 + r2 - lenght);
+        float factor = len * reciprocal(lenght);
+
+        *x1 -= x * factor;
+        *y1 -= y * factor;
+    }
 }
 
 int main(void) {
@@ -2242,8 +2256,11 @@ int main(void) {
     uint8_t *fb = (uint8_t*)aligned_alloc(32, (SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t) + 31) & ~31);
     memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
 
-    Rect player_1 = {900, 150, {0, 0, 0, 0}, {0, 0, 0, 0}, 200, 200, alpha_writer(0xbb0505, 0.5f), 100.0f, {3, 10}};
-    Rect player_2 = {900, 150, {400, 0, 0, 0}, {500, 0, 0, 0}, 200, 200, alpha_writer(0xbb0500, 0.5f), 100.0f, {3, 10}};
+    // Rect player_1 = {900, 150, {0, 0, 0, 0}, {0, 0, 0, 0}, 200, 200, alpha_writer(0xbb0505, 0.5f), 100.0f, {3, 10}};
+    // Rect player_2 = {900, 150, {400, 0, 0, 0}, {500, 0, 0, 0}, 200, 200, alpha_writer(0xbb0500, 0.5f), 100.0f, {3, 10}};
+
+    Circle player_1 = {900, 1, 100, 100, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}};
+    Circle player_2 = {900, 1, 500, 400, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}};
 
     // int n = 100;
     // float *arr_x = (float *)malloc((n + 1) * sizeof(float));
@@ -2253,8 +2270,8 @@ int main(void) {
     // arr_y[n] = 400.0f;
     // init_poligon(arr_x, arr_y, n, arr_x[n], arr_y[n], 100);
 
-    init_rect(&player_1);
-    init_rect(&player_2);
+    // init_rect(&player_1);
+    // init_rect(&player_2);
 
     // Circle player_1 = {500, 200, 100, 100, 50, 0xbb0505};
 
@@ -2263,7 +2280,7 @@ int main(void) {
     //Line simple_line = {10, 10, 100, 150, 500, 0xeedb04};
 
     /* инициализирум счетчик фпс */
-    const double fps = 10000.0;
+    const double fps = 146.0;
 
     double last_frame_time = get_time_in_seconds();
     float delta_time = 0.0f;
@@ -2442,22 +2459,36 @@ int main(void) {
 
         float d_x = move_x * player_1.speed * delta_time, d_y = move_y * player_1.speed * delta_time;
 
+        move_x = (keys[XK_D] || keys[XK_d]) - (keys[XK_A] || keys[XK_a]);
+        move_y = (keys[XK_S] || keys[XK_s]) - (keys[XK_W] || keys[XK_w]);
+
+        player_2.x +=  move_x * player_1.speed * delta_time;
+        player_2.y +=  move_y * player_1.speed * delta_time;
+
         if (buttons[Button1]){
-            d_x += mouse_x - (player_1.x[0] + player_1.x[2]) * 0.5f;
-            d_y += mouse_y - (player_1.y[0] + player_1.y[2]) * 0.5f;
+            d_x += mouse_x - player_1.x;
+            d_y += mouse_y - player_1.y;
             // buttons[Button1] = false;
         }
 
-        vector_add_scal(player_1.x, 4, d_x);
-        vector_add_scal(player_1.y, 4, d_y);
+        // vector_add_scal(player_1.x, 4, d_x);
+        // vector_add_scal(player_1.y, 4, d_y);
+
+        player_1.x += d_x;
+        player_1.y += d_y;
 
         /* обработка столкновений */
-        if (is_colission(player_1.x, player_1.y, player_2.x, player_2.y, &d_x, &d_y)) {
-            vector_add_scal(player_1.x, 4, d_x);
-            vector_add_scal(player_1.y, 4, d_y);
-        }
+        // if (is_colission(player_1.x, player_1.y, player_2.x, player_2.y, &d_x, &d_y)) {
+        //     vector_add_scal(player_1.x, 4, d_x);
+        //     vector_add_scal(player_1.y, 4, d_y);
+        // }
 
-        if (rot) rotate_polygon(player_1.x, player_1.y, 4, (M_PI * reciprocal(180.0f)) * rot * player_1.deg * delta_time);
+        is_circle_colission(&player_1.x, &player_1.y, player_2.x, player_2.y, player_1.r, player_2.r);
+        is_circle_colission(&player_2.x, &player_2.y, player_1.x, player_1.y, player_2.r, player_1.r);
+
+        rot += 0;
+
+        // if (rot) rotate_polygon(player_1.x, player_1.y, 4, (M_PI * reciprocal(180.0f)) * rot * player_1.deg * delta_time);
 
         if (keys[XK_F11]){
             xev.xclient.data.l[0] = 1;
@@ -2476,14 +2507,6 @@ int main(void) {
             keys[XK_F12] = false;
         }
 
-        // short scale_dir = keys[XK_0] - keys[XK_9];
-
-        // if (scale_dir != 0) {
-        //     float factor = (scale_dir > 0) ? (player_1.scale * delta_time) : reciprocal(player_1.scale * delta_time);
-        //     player_1.width *= factor;
-        //     player_1.height *= factor;
-        // }
-
         /* отрисовка кадров */
         if (is_buffer_ready[back_buffer_idx]){
             framebuffer = (uint32_t*)x_image[back_buffer_idx]->data;
@@ -2492,13 +2515,11 @@ int main(void) {
             // clear_screen(0x1A1A2E, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #1A1A2E)
             // memset(framebuffer, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
 
-            draw_rect_glass(player_2.x[0], player_2.y[0], player_2.width, player_2.height, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer);
+            draw_filled_circle_1_glass(player_2.x, player_2.y, player_2.r, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
-            draw_triangle_avx_glass(player_1.x[0], player_1.y[0], player_1.x[1], player_1.y[1],
-                player_1.x[2], player_1.y[2], player_1.color,  SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
+            memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
 
-            draw_triangle_avx_glass(player_1.x[2], player_1.y[2], player_1.x[3], player_1.y[3],
-                player_1.x[0], player_1.y[0], player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
+            draw_filled_circle_1_glass(player_1.x, player_1.y, player_1.r, player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
             memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
             //memcpy_avx_epi32(framebuffer, framebuffer_2, SCREEN_WIDTH * SCREEN_HEIGHT);
