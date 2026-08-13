@@ -4,6 +4,7 @@
 #include <wchar.h>
 #include <wctype.h>
 #include <locale.h>
+#include <stdint.h>
 
 static const uint8_t font_data[][7] = {
     {0x1F, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1F}, // 0
@@ -189,37 +190,37 @@ static inline void init_char_lut(void) {
     char_lut[L'Ё'] = char_lut[L'Е'];
     char_lut[L'ё'] = char_lut[L'е'];
 
-    char_lut[':'] = 126; 
-    char_lut[' '] = 127; 
-    char_lut['?'] = 128; 
+    char_lut[':'] = 126;
+    char_lut[' '] = 127;
+    char_lut['?'] = 128;
     char_lut[','] = 129;
-    char_lut['\\'] = 130; 
-    char_lut['+'] = 131; 
-    char_lut['-'] = 132; 
+    char_lut['\\'] = 130;
+    char_lut['+'] = 131;
+    char_lut['-'] = 132;
     char_lut['/'] = 133;
-    char_lut['.'] = 134; 
-    char_lut['#'] = 135; 
-    char_lut['$'] = 136; 
+    char_lut['.'] = 134;
+    char_lut['#'] = 135;
+    char_lut['$'] = 136;
     char_lut['%'] = 137;
-    char_lut['('] = 138; 
+    char_lut['('] = 138;
     char_lut[')'] = 139;
-    char_lut['='] = 140; 
-    char_lut['&'] = 141; 
+    char_lut['='] = 140;
+    char_lut['&'] = 141;
     char_lut['^'] = 142;
-    char_lut['@'] = 143; 
-    char_lut['_'] = 144; 
-    char_lut['~'] = 145; 
+    char_lut['@'] = 143;
+    char_lut['_'] = 144;
+    char_lut['~'] = 145;
     char_lut['!'] = 146;
-    char_lut['"'] = 147; 
-    char_lut['\''] = 148; 
-    char_lut['['] = 149; 
+    char_lut['"'] = 147;
+    char_lut['\''] = 148;
+    char_lut['['] = 149;
     char_lut[']'] = 150;
-    char_lut['{'] = 151; 
-    char_lut['}'] = 152; 
-    char_lut['*'] = 153; 
+    char_lut['{'] = 151;
+    char_lut['}'] = 152;
+    char_lut['*'] = 153;
     char_lut['<'] = 154;
-    char_lut['>'] = 155; 
-    
+    char_lut['>'] = 155;
+
 
     lut_initialized = true;
 }
@@ -227,7 +228,7 @@ static inline void init_char_lut(void) {
 static inline int get_char_index(wchar_t c) {
     if (c >= 0 && c < 1200) {
         int index = char_lut[c];
-        return index; 
+        return index;
     }
     return 156;
 }

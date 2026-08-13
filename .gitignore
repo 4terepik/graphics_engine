@@ -1,7 +1,6 @@
 .vscode/
-images.png
-main
 stb-master/
 a.out
+*.o
 
 #игнорирую мусор

@@ -1,16 +1,15 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -Werror -Ofast -ffast-math -mavx2
+CFLAGS = -Wall -Wextra -Werror -Ofast -s -flto
 
-LIBS = -lX11 -lXext -lm -lasound -fopenmp
+LIBS = -lX11 -lXext -lm -lasound -fopenmp -mavx2
 
-TARGET = ./main
+TARGET = ./a.out
 
-SOURCHE = Linux/2D/main.c
+SOURCHE = Linux/main.c
 
 all: $(TARGET)
 
 $(TARGET):
-	$(CC) $(CFLAGS) $(SOURCHE) $(LIBS) -s -o $(TARGET)
+	gcc $(SOURCHE) $(CFLAGS) $(LIBS)
 
 clean:
 	rm -rf $(TARGET)
