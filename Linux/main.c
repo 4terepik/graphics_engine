@@ -1,6 +1,8 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/XShm.h>
 #include <X11/Xutil.h>
+#include <math.h>
+#include <stdbool.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <alsa/asoundlib.h>
@@ -279,8 +281,9 @@ int main(void) {
     // Rect player_1 = {900, 150, {0, 0, 0, 0}, {0, 0, 0, 0}, 200, 200, alpha_writer(0xbb0505, 0.5f), 100.0f, {3, 10}};
     // Rect player_2 = {900, 150, {400, 0, 0, 0}, {500, 0, 0, 0}, 200, 200, alpha_writer(0xbb0500, 0.5f), 100.0f, {3, 10}};
 
-    Circle player_1 = {900, 1, 100, 100, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1.2f};
-    Circle player_2 = {900, 1, 500, 400, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1.0f};
+    Circle player_1 = {{0, 0}, 1, {100, 100}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 10.2f, {900, 900}};
+    // Circle player_2 = {{0, 0}, 1, {500, 5400}, 5000, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1000000000000000000.2f, {900, 900}};
+    Circle player_2 = {{0, 0}, 1, {500, 400}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1000000000000000000.2f, {900, 900}};
 
     // int n = 100;
     // float *arr_x = (float *)malloc((n + 1) * sizeof(float));
@@ -295,21 +298,26 @@ int main(void) {
 
     // Circle player_1 = {500, 200, 100, 100, 50, 0xbb0505};
 
-    Text fps_text = {0, 2, 10, 10, L"FPS:", alpha_writer(0x2dc100, 0.5f), 8, {0, 0}};
+    Text fps_text = {{0, 0}, 2, {10, 10}, L"FPS:", alpha_writer(0x2dc100, 0.5f), 8, {0, 0}};
 
     //Line simple_line = {10, 10, 100, 150, 500, 0xeedb04};
 
     /* инициализирум счетчик фпс */
-    const double fps = 146.0;
+    const double fps = 180.0;
+    const double physics_fps = 60.0;
 
     double last_frame_time = get_time_in_seconds();
-    float delta_time = 0.0f;
+    double delta_time = 0.0f;
+    double physics_delta_time = 0.0;
 
-    float fps_timer = 0.0f;
+    double fps_timer = 0.0;
     unsigned short fps_count = 0;
     unsigned short current_fps = 0;
 
     const double target_frame_time = 1.0 / fps;
+    const double physics_target_frame_time = 1.0 / physics_fps;
+
+    Vector2d f_keys = {18000.5f, 18000.5f};
 
     // WavHeader my_header = {0};
     // short *sound_data = load_wav("Linux/2D/музон.wav", &my_header);
@@ -346,16 +354,18 @@ int main(void) {
         delta_time = current_frame_time - last_frame_time;
         last_frame_time = current_frame_time;
 
-        delta_time = delta_time > 0.1f ? 0.1f : delta_time;
+        delta_time = fmin(0.1, delta_time);
 
         fps_timer += delta_time;
         fps_count++;
 
-        if (fps_timer >= 1.0f) {
+        physics_delta_time += delta_time;
+
+        if (fps_timer >= 1.0) {
             current_fps = fps_count;
             swprintf(fps_text.text, 32, L"FPS:%d", current_fps);
             fps_count = 0;
-            fps_timer -= 1.0f;
+            fps_timer -= 1.0;
 
             // char str[10];
             // wcstombs(str, fps_text.text, sizeof(str));
@@ -473,38 +483,48 @@ int main(void) {
         }
 
         /* сам игровой цикл */
-        move_x = keys[XK_Right] - keys[XK_Left];
-        move_y = keys[XK_Down] - keys[XK_Up];
+        Vector2d move = {keys[XK_Right] - keys[XK_Left], keys[XK_Down] - keys[XK_Up]};
 
         rot = (keys[XK_d] - keys[XK_a]) + (keys[XK_D] - keys[XK_A]);
 
-        float d_x = move_x * player_1.speed * delta_time, d_y = move_y * player_1.speed * delta_time;
+        Vector2d old_speed_1 = player_1.speed;
+
+        acceleration(&player_1.speed, player_1.mass, &player_1.max_speed, &f_keys, &move, true, delta_time);
+
+        Vector2d f_v = force_graviti(&player_1.loc, &player_2.loc, player_1.mass, player_2.mass);
+
+        acceleration(&player_1.speed, player_1.mass, &player_1.max_speed, &f_v, &(Vector2d){1.0f, 1.0f}, false, delta_time);
+
+        float d_x = (player_1.speed.x + old_speed_1.x) * 0.5f * delta_time, d_y = (player_1.speed.y + old_speed_1.y) * 0.5f * delta_time;
 
         move_x = (keys[XK_D] || keys[XK_d]) - (keys[XK_A] || keys[XK_a]);
         move_y = (keys[XK_S] || keys[XK_s]) - (keys[XK_W] || keys[XK_w]);
 
-        player_2.x +=  move_x * player_1.speed * delta_time;
-        player_2.y +=  move_y * player_1.speed * delta_time;
+        move.x = move_x;
+        move.y = move_y;
+
+        // Vector2d old_speed_2 = player_2.speed;
+
+        acceleration(&player_2.speed, player_2.mass, &player_2.max_speed, &(Vector2d){90000000000000000.0f, 90000000000000000.0f}, &move, true, delta_time);
+        acceleration(&player_2.speed, player_2.mass, &player_2.max_speed, &f_v, &(Vector2d){-1.0f, -1.0f}, false, delta_time);
+
+        player_2.loc.x +=  player_2.speed.x * delta_time;
+        player_2.loc.y +=  player_2.speed.y * delta_time;
 
         if (buttons[Button1]){
-            d_x += mouse_x - player_1.x;
-            d_y += mouse_y - player_1.y;
+            d_x += mouse_x - player_1.loc.x;
+            d_y += mouse_y - player_1.loc.y;
             // buttons[Button1] = false;
         }
 
         // vector_add_scal(player_1.x, 4, d_x);
         // vector_add_scal(player_1.y, 4, d_y);
 
-        player_1.x += d_x;
-        player_1.y += d_y;
+        player_1.loc.x += d_x;
+        player_1.loc.y += d_y;
 
         /* обработка столкновений */
-        // if (is_colission(player_1.x, player_1.y, player_2.x, player_2.y, &d_x, &d_y)) {
-        //     vector_add_scal(player_1.x, 4, d_x);
-        //     vector_add_scal(player_1.y, 4, d_y);
-        // }
-
-        is_circle_colission(&player_1.x, &player_1.y, &player_2.x, &player_2.y, player_1.r, player_2.r, player_1.mass, player_2.mass);
+        is_circle_colission(&player_1.loc.x, &player_1.loc.y, &player_2.loc.x, &player_2.loc.y, player_1.r, player_2.r, player_1.mass, player_2.mass);
 
         rot += 0;
 
@@ -535,16 +555,16 @@ int main(void) {
             // clear_screen(0x1A1A2E, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #1A1A2E)
             // memset(framebuffer, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
 
-            draw_filled_circle_glass(player_2.x, player_2.y, player_2.r, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
+            draw_filled_circle_glass(player_2.loc.x, player_2.loc.y, player_2.r, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
             memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
 
-            draw_filled_circle_glass(player_1.x, player_1.y, player_1.r, player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
+            draw_filled_circle_glass(player_1.loc.x, player_1.loc.y, player_1.r, player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
             memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
             //memcpy_avx_epi32(framebuffer, framebuffer_2, SCREEN_WIDTH * SCREEN_HEIGHT);
 
-            draw_string_glass(fps_text.x, fps_text.y, fps_text.text, fps_text.scale, fps_text.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #13b17c)
+            draw_string_glass(fps_text.loc.x, fps_text.loc.y, fps_text.text, fps_text.scale, fps_text.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #13b17c)
 
             is_buffer_ready[back_buffer_idx] = false;
 

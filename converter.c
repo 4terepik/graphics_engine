@@ -4,12 +4,12 @@
 #include <string.h>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "stb-master/stb_image.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+#include "stb-master/stb_image_write.h"
 
-// gcc Linux/2D/converter.c -o tga_converter -lm -Wall -Wextra -Werror -s -Ofast -ffast-math
+// gcc converter.c -o tga_converter -lm -Wall -Wextra -Werror -s -Ofast -ffast-math
 
 #pragma pack(push, 1)
 typedef struct {
@@ -21,16 +21,16 @@ typedef struct {
     uint8_t  color_map_depth;
     uint16_t x_origin;
     uint16_t y_origin;
-    uint16_t width;           
-    uint16_t height;          
+    uint16_t width;
+    uint16_t height;
     uint8_t  bits_per_pixel;
     uint8_t  image_descriptor;
 } TGAHeader;
 #pragma pack(pop)
 
 int is_common_format(const char *path) {
-    return strstr(path, ".png")  || strstr(path, ".PNG")  || 
-           strstr(path, ".jpg")  || strstr(path, ".jpeg") || strstr(path, ".JPG") || 
+    return strstr(path, ".png")  || strstr(path, ".PNG")  ||
+           strstr(path, ".jpg")  || strstr(path, ".jpeg") || strstr(path, ".JPG") ||
            strstr(path, ".bmp")  || strstr(path, ".BMP");
 }
 
@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
     if (is_common_format(input_path) && (strstr(output_path, ".tga") || strstr(output_path, ".TGA"))) {
         int width, height, channels;
         uint8_t *pixels = stbi_load(input_path, &width, &height, &channels, STBI_rgb_alpha);
-        
+
         if (!pixels) {
             fprintf(stderr, "Ошибка: Не удалось загрузить или декодировать файл %s\n", input_path);
             return 2;
@@ -83,6 +83,7 @@ int main(int argc, char *argv[]) {
 
         printf("Успешно сконвертировано! Файл сохранен как: %s (%dx%d, 32-bit BGRA)\n", output_path, width, height);
         return 0;
+
     } else if ((strstr(input_path, ".tga") || strstr(input_path, ".TGA")) && is_common_format(output_path)) {
         FILE *f = fopen(input_path, "rb");
         if (!f) {
@@ -129,7 +130,7 @@ int main(int argc, char *argv[]) {
             uint8_t *p = &pixels[i * 4];
             uint8_t b = p[0];
             uint8_t r = p[2];
-            
+
             p[0] = r;
             p[2] = b;
 
@@ -141,10 +142,10 @@ int main(int argc, char *argv[]) {
         int success = 0;
         if (strstr(output_path, ".png") || strstr(output_path, ".PNG")) {
             success = stbi_write_png(output_path, width, height, 4, pixels, width * 4);
-        } 
+        }
         else if (strstr(output_path, ".jpg") || strstr(output_path, ".jpeg") || strstr(output_path, ".JPG")) {
             success = stbi_write_jpg(output_path, width, height, 4, pixels, 100);
-        } 
+        }
         else if (strstr(output_path, ".bmp") || strstr(output_path, ".BMP")) {
             success = stbi_write_bmp(output_path, width, height, 4, pixels);
         }

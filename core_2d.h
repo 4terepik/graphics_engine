@@ -13,8 +13,19 @@
 #define FLT_MAX  3.402823e+38f
 #define FLT_MIN 0.000000000000000000000000000000000001f
 
+#define M_GRAV 6.67430e-11f
+#define M_G 9.80665f
+#define GROUND_MU_TREN 0.3f
+
+#define SIGN(x) ((x > 0) - (x < 0))
+
+typedef struct {
+    float x;
+    float y;
+} Vector2d;
+
 typedef struct{
-    float speed;
+    Vector2d speed;
     float scale;
     float x[4];
     float y[4];
@@ -23,65 +34,74 @@ typedef struct{
     uint32_t color;
     float deg;
     short refraction[2];
+    float mass;
+    Vector2d max_speed;
 } Rect;
 
 typedef struct{
-    float speed;
+    Vector2d speed;
     unsigned short scale;
-    float x;
-    float y;
+    Vector2d loc;
     wchar_t text[32];
     uint32_t color;
     unsigned int len;
     short refraction[2];
+    // float mass;
+    // Vector2d max_speed;
 } Text;
 
 typedef struct {
     float x[2];
     float y[2];
-    float speed;
+    Vector2d speed;
     uint32_t color;
     float deg;
     short refraction[2];
+    float mass;
+    Vector2d max_speed;
 } Line;
 
 typedef struct {
-    float x;
-    float y;
-    float speed;
+    Vector2d loc;
+    Vector2d speed;
     uint32_t color;
     short refraction[2];
+    float mass;
+    Vector2d max_speed;
 } Pixel;
 
 typedef struct {
     uint16_t width;
     uint16_t height;
     uint32_t *pixels;
-    float x;
-    float y;
-    float speed;
+    Vector2d loc;
+    Vector2d speed;
     short refraction[2];
+    float mass;
+    Vector2d max_speed;
 } TGA_sprite;
 
 typedef struct{
-    float speed;
+    Vector2d speed;
     float scale;
-    float x;
-    float y;
+    Vector2d loc;
     float r;
     uint32_t color;
     short refraction[2];
     float mass;
+    Vector2d max_speed;
 } Circle;
 
 typedef struct{
-    float speed;
+    Vector2d speed;
     float scale;
     float x[3];
     float y[3];
     uint32_t color;
     float deg;
     short refraction[2];
+    float mass;
+    Vector2d max_speed;
 } Triangle;
 
 #pragma pack(push, 1)
@@ -1147,13 +1167,13 @@ static inline void draw_triangle_avx_refraction(int x0, int y0, int x1, int y1, 
 /* триугольники конец */
 
 static inline void draw_sprite(TGA_sprite *sprite, int width, int height, uint32_t *framebuffer){
-    int start_x = max(sprite->x, 0);
-    int end_x = min(sprite->x + sprite->width, width);
-    int start_y = max(sprite->y, 0);
-    int end_y = min(sprite->y + sprite->height, height);
+    int start_x = max(sprite->loc.x, 0);
+    int end_x = min(sprite->loc.x + sprite->width, width);
+    int start_y = max(sprite->loc.y, 0);
+    int end_y = min(sprite->loc.y + sprite->height, height);
 
-    int bias_y = start_y == 0 ? 0 - sprite->y : 0;
-    int bias_x = start_x == 0 ? 0 - sprite->x : 0;
+    int bias_y = start_y == 0 ? 0 - sprite->loc.y : 0;
+    int bias_x = start_x == 0 ? 0 - sprite->loc.x : 0;
 
     int rows = start_y * width;
     int len = width * height - 1;
@@ -1765,102 +1785,6 @@ static inline void draw_len_string_refraction(int x, int y, wchar_t *text, unsig
 
 /* строки конец */
 
-static inline void project_polygon(float *poly_x, float *poly_y, int count, float axis_x, float axis_y, float *min, float *max) {
-    *min = FLT_MAX;
-    *max = -FLT_MAX;
-    for (short i = 0; i < count; i++) {
-        float dot = (poly_x[i] * axis_x) + (poly_y[i] * axis_y);
-        *min = fminf(dot, *min);
-        *max = fmaxf(dot, *max);
-    }
-}
-
-static inline bool is_colission(float *x1, float *y1, float *x2, float *y2, float *d_x, float *d_y) {
-    *d_x = 0.0f;
-    *d_y = 0.0f;
-
-    float overlap = FLT_MAX;
-    float smallest_axis_x = 0.0f;
-    float smallest_axis_y = 0.0f;
-
-    for (short i = 0; i < 4; i++) {
-        short next = (i + 1) & ~3;
-
-        float edge_x = x1[next] - x1[i];
-        float edge_y = y1[next] - y1[i];
-
-        float axis_x = -edge_y;
-        float axis_y = edge_x;
-
-        float length = sqrtf(axis_x * axis_x + axis_y * axis_y);
-        if (length == 0.0f) continue;
-        axis_x /= length;
-        axis_y /= length;
-
-        float min1, max1, min2, max2;
-        project_polygon(x1, y1, 4, axis_x, axis_y, &min1, &max1);
-        project_polygon(x2, y2, 4, axis_x, axis_y, &min2, &max2);
-
-        if (max1 < min2 || max2 < min1) return false;
-
-        float current_overlap = fminf(max1, max2) - fmaxf(min1, min2);
-
-        if (current_overlap < overlap) {
-            overlap = current_overlap;
-            smallest_axis_x = axis_x;
-            smallest_axis_y = axis_y;
-        }
-    }
-
-    for (short i = 0; i < 4; i++) {
-        short next = (i + 1) & ~3;
-
-        float edge_x = x2[next] - x2[i];
-        float edge_y = y2[next] - y2[i];
-
-        float axis_x = -edge_y;
-        float axis_y = edge_x;
-
-        float length = sqrtf(axis_x * axis_x + axis_y * axis_y);
-        if (length == 0.0f) continue;
-        axis_x /= length;
-        axis_y /= length;
-
-        float min1, max1, min2, max2;
-        project_polygon(x1, y1, 4, axis_x, axis_y, &min1, &max1);
-        project_polygon(x2, y2, 4, axis_x, axis_y, &min2, &max2);
-
-        if (max1 < min2 || max2 < min1) return false;
-
-        float current_overlap = fminf(max1, max2) - fmaxf(min1, min2);
-
-        if (current_overlap < overlap) {
-            overlap = current_overlap;
-            smallest_axis_x = axis_x;
-            smallest_axis_y = axis_y;
-        }
-    }
-
-    float c1_x = (x1[0] + x1[2]) * 0.5f;
-    float c1_y = (y1[0] + y1[2]) * 0.5f;
-    float c2_x = (x2[0] + x2[2]) * 0.5f;
-    float c2_y = (y2[0] + y2[2]) * 0.5f;
-
-    float d_centers_x = c1_x - c2_x;
-    float d_centers_y = c1_y - c2_y;
-    float dot_direction = (d_centers_x * smallest_axis_x) + (d_centers_y * smallest_axis_y);
-
-    dot_direction = (fabsf(dot_direction) * reciprocal(dot_direction));
-
-    smallest_axis_x = smallest_axis_x * dot_direction;
-    smallest_axis_y = smallest_axis_y * dot_direction;
-
-    *d_x = smallest_axis_x * overlap;
-    *d_y = smallest_axis_y * overlap;
-
-    return true;
-}
-
 static inline void is_circle_colission(float *x1, float *y1, float *x2, float *y2, float r1, float r2, float mass1, float mass2){
     float x = (*x2 - *x1);
     float y = (*y2 - *y1);
@@ -1876,6 +1800,45 @@ static inline void is_circle_colission(float *x1, float *y1, float *x2, float *y
         *x2 += x * factor * mass1;
         *y2 += y * factor * mass1;
     }
+}
+
+static inline void acceleration(Vector2d *speed, const float mass, const Vector2d *max_speed, const Vector2d *f, const Vector2d *move, bool use_g, const double delta_time){
+    speed->x += f->x * move->x * reciprocal(mass) * delta_time;
+    speed->y += f->y * move->y * reciprocal(mass) * delta_time;
+
+    if (use_g){
+        if (speed->x > 0.0f){
+            speed->x -= M_G * GROUND_MU_TREN;
+            speed->x = fmaxf(0.0f, speed->x);
+        } else if (speed->x < 0.0f){
+            speed->x += M_G * GROUND_MU_TREN;
+            speed->x = fminf(0.0f, speed->x);
+        }
+
+        if (speed->y > 0.0f){
+            speed->y -= M_G * GROUND_MU_TREN;
+            speed->y = fmaxf(0.0f, speed->y);
+        } else if (speed->y < 0.0f){
+            speed->y += M_G * GROUND_MU_TREN;
+            speed->y = fminf(0.0f, speed->y);
+        }
+    }
+
+    speed->x = fminf(fabsf(speed->x), max_speed->x) * SIGN(speed->x);
+    speed->y = fminf(fabsf(speed->y), max_speed->y) * SIGN(speed->y);
+}
+
+static inline Vector2d force_graviti(const Vector2d *loc_1, const Vector2d *loc_2, const float mass_1, const float mass_2){
+    float x = (loc_2->x - loc_1->x);
+    float y = (loc_2->y - loc_1->y);
+    float lenght = x * x + y * y + FLT_MIN;
+    float f = M_GRAV * mass_1 * mass_2 * reciprocal(lenght);
+
+    lenght = reciprocal(sqrtf(lenght));
+
+    Vector2d f_v = {x * lenght * f, y * lenght * f};
+
+    return f_v;
 }
 
 #endif // CORE_H
