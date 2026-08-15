@@ -11,10 +11,13 @@
 #include "font.h"
 
 #define FLT_MAX  3.402823e+38f
-#define FLT_MIN 0.000000000000000000000000000000000001f
+#define FLT_MIN 1e-36f
 
 #define M_GRAV 6.67430e-11f
 #define M_G 9.80665f
+#define M_K 9e+9f
+#define M_MAGNITIC 1.25663706e-6f
+
 #define GROUND_MU_TREN 0.3f
 
 #define SIGN(x) ((x > 0) - (x < 0))
@@ -22,10 +25,20 @@
 typedef struct {
     float x;
     float y;
-} Vector2d;
+} Vector2f;
+
+typedef struct {
+    short x;
+    short y;
+} Vector2s;
+
+typedef struct {
+    int x;
+    int y;
+} Vector2i;
 
 typedef struct{
-    Vector2d speed;
+    Vector2f speed;
     float scale;
     float x[4];
     float y[4];
@@ -35,65 +48,67 @@ typedef struct{
     float deg;
     short refraction[2];
     float mass;
-    Vector2d max_speed;
+    Vector2f max_speed;
 } Rect;
 
 typedef struct{
-    Vector2d speed;
+    Vector2f speed;
     unsigned short scale;
-    Vector2d loc;
+    Vector2f loc;
     wchar_t text[32];
     uint32_t color;
     unsigned int len;
     short refraction[2];
     // float mass;
-    // Vector2d max_speed;
+    // Vector2f max_speed;
 } Text;
 
 typedef struct {
     float x[2];
     float y[2];
-    Vector2d speed;
+    Vector2f speed;
     uint32_t color;
     float deg;
     short refraction[2];
     float mass;
-    Vector2d max_speed;
+    Vector2f max_speed;
 } Line;
 
 typedef struct {
-    Vector2d loc;
-    Vector2d speed;
+    Vector2f loc;
+    Vector2f speed;
     uint32_t color;
     short refraction[2];
     float mass;
-    Vector2d max_speed;
+    Vector2f max_speed;
 } Pixel;
 
 typedef struct {
     uint16_t width;
     uint16_t height;
     uint32_t *pixels;
-    Vector2d loc;
-    Vector2d speed;
+    Vector2f loc;
+    Vector2f speed;
     short refraction[2];
     float mass;
-    Vector2d max_speed;
+    Vector2f max_speed;
 } TGA_sprite;
 
 typedef struct{
-    Vector2d speed;
+    Vector2f speed;
     float scale;
-    Vector2d loc;
+    Vector2f loc;
     float r;
     uint32_t color;
     short refraction[2];
     float mass;
-    Vector2d max_speed;
+    Vector2f max_speed;
+    Vector2s move;
+    float q;
 } Circle;
 
 typedef struct{
-    Vector2d speed;
+    Vector2f speed;
     float scale;
     float x[3];
     float y[3];
@@ -101,7 +116,7 @@ typedef struct{
     float deg;
     short refraction[2];
     float mass;
-    Vector2d max_speed;
+    Vector2f max_speed;
 } Triangle;
 
 #pragma pack(push, 1)
@@ -1626,112 +1641,89 @@ static inline void draw_char_refraction(int idx, int x, int y, unsigned short sc
 
 /* полигоны начало */
 
-static inline void init_poligon(float* arr_x, float* arr_y, short n, int x, int y, short r){
+static inline void init_poligon(Vector2f* arr, int n, int x, int y, int r){
     float rad = 2.0f * M_PI * reciprocal(n);
 
     float dx, dy, cos_a, sin_a;
 
-    arr_x[0] = x;
-    arr_y[0] = y - r;
+    arr[0].x = x;
+    arr[0].y = y;
+
+    arr[1].x = x;
+    arr[1].y = y - r;
 
     cos_a = cosf(rad);
     sin_a = sinf(rad);
 
-    for (short i = 0; i < n - 1; i++){
-        dx = arr_x[i] - x;
-        dy = arr_y[i] - y;
+    for (int i = 1; i < n; i++){
+        dx = arr[i].x - x;
+        dy = arr[i].y - y;
 
-        arr_x[i + 1] = dx * cos_a - dy * sin_a + x;
-        arr_y[i + 1] = dx * sin_a + dy * cos_a + y;
+        arr[i + 1].x = dx * cos_a - dy * sin_a + x;
+        arr[i + 1].y = dx * sin_a + dy * cos_a + y;
     }
 }
 
-static inline void rotate_polygon(float *x, float *y, short n, float rad){
-    float cx = (max_vector(x, n) + min_vector(x, n)) * 0.5f;
-    float cy = (max_vector(y, n) + min_vector(y, n)) * 0.5f;
-
+static inline void rotate_polygon(Vector2f *arr, int n, float rad){
     float cos_a = cosf(rad);
     float sin_a = sinf(rad);
 
-    float dx, dy;
+    for (int i = 1; i <= n; i++){
+        float dx = arr[i].x - arr[0].x;
+        float dy = arr[i].y - arr[0].y;
 
-    for (short i = 0; i < n; i++){
-        dx = x[i] - cx;
-        dy = y[i] - cy;
-
-        x[i] = dx * cos_a - dy * sin_a + cx;
-        y[i] = dx * sin_a + dy * cos_a + cy;
+        arr[i].x = dx * cos_a - dy * sin_a + arr[0].x;
+        arr[i].y = dx * sin_a + dy * cos_a + arr[0].y;
     }
 }
 
-static inline void draw_polygon_circuit(float *x, float *y, short n, uint32_t color, short width, short height, uint32_t *framebuffer){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_line(x[i], y[i], x[0], y[0], color, width, height, framebuffer);
-            return;
-        }
-        draw_line(x[i], y[i], x[i + 1], y[i + 1], color, width, height, framebuffer);
+static inline void draw_polygon_circuit(Vector2f *arr, int n, uint32_t color, short width, short height, uint32_t *framebuffer){
+    for (int i = 1; i < n; i++){
+        draw_line(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, color, width, height, framebuffer);
     }
+    draw_line(arr[n].x, arr[n].y, arr[1].x, arr[1].y, color, width, height, framebuffer);
 }
 
-static inline void draw_polygon(float *x, float *y, short n, int xc, int yc, uint32_t color, short width, short height, uint32_t *framebuffer){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_triangle(x[i], y[i], x[0], y[0], xc, yc, color,  width, height, framebuffer);
-            return;
-        }
-        draw_triangle(x[i], y[i], x[i + 1], y[i + 1], xc, yc, color, width, height, framebuffer);
+static inline void draw_polygon(Vector2f *arr, int n, uint32_t color, short width, short height, uint32_t *framebuffer){
+    for (int i = 1; i < n; i++){
+        draw_triangle(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, arr[0].x, arr[0].y, color, width, height, framebuffer);
     }
+    draw_triangle(arr[n].x, arr[n].y, arr[1].x, arr[1].y, arr[0].x, arr[0].y, color,  width, height, framebuffer);
 }
 
-static inline void draw_polygon_glass(float *x, float *y, short n, int xc, int yc, uint32_t color, short width, short height, uint32_t *framebuffer, uint8_t *fb){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_triangle_glass(x[i], y[i], x[0], y[0], xc, yc, color, width, height, framebuffer, fb);
-            return;
-        }
-        draw_triangle_glass(x[i], y[i], x[i + 1], y[i + 1], xc, yc, color, width, height, framebuffer, fb);
+static inline void draw_polygon_glass(Vector2f *arr, int n, uint32_t color, short width, short height, uint32_t *framebuffer, uint8_t *fb){
+    for (int i = 1; i < n; i++){
+        draw_triangle_glass(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, arr[0].x, arr[0].y, color, width, height, framebuffer, fb);
     }
+    draw_triangle_glass(arr[n].x, arr[n].y, arr[1].x, arr[1].y, arr[0].x, arr[0].y, color, width, height, framebuffer, fb);
 }
 
-static inline void draw_polygon_refraction(float *x, float *y, short n, int xc, int yc, uint32_t color, short *arr, short width, short height, uint32_t *framebuffer, uint32_t *buffer){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_triangle_refraction(x[i], y[i], x[0], y[0], xc, yc, color, arr,  width, height, framebuffer, buffer);
-            return;
-        }
-        draw_triangle_refraction(x[i], y[i], x[i + 1], y[i + 1], xc, yc, color, arr, width, height, framebuffer, buffer);
+static inline void draw_polygon_refraction(Vector2f *arr, int n, uint32_t color, short *arr_ref, short width, short height, uint32_t *framebuffer, uint32_t *buffer){
+    for (int i = 1; i < n; i++){
+        draw_triangle_refraction(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, arr[0].x, arr[0].y, color, arr_ref, width, height, framebuffer, buffer);
     }
+    draw_triangle_refraction(arr[n].x, arr[n].y, arr[1].x, arr[1].y, arr[0].x, arr[0].y, color, arr_ref,  width, height, framebuffer, buffer);
 }
 
-static inline void draw_polygon_avx(float *x, float *y, short n, int xc, int yc, uint32_t color, short width, short height, uint32_t *framebuffer){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_triangle_avx(x[i], y[i], x[0], y[0], xc, yc, color, width, height, framebuffer);
-            return;
-        }
-        draw_triangle_avx(x[i], y[i], x[i + 1], y[i + 1], xc, yc, color, width, height, framebuffer);
+static inline void draw_polygon_avx(Vector2f *arr, int n, uint32_t color, short width, short height, uint32_t *framebuffer){
+    for (int i = 1; i < n; i++){
+        draw_triangle_avx(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, arr[0].x, arr[0].y, color, width, height, framebuffer);
     }
+    draw_triangle_avx(arr[n].x, arr[n].y, arr[1].x, arr[1].y, arr[0].x, arr[0].y, color, width, height, framebuffer);
 }
 
-static inline void draw_polygon_avx_glass(float *x, float *y, short n, int xc, int yc, uint32_t color, short width, short height, uint32_t *framebuffer, uint8_t *fb){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_triangle_avx_glass(x[i], y[i], x[0], y[0], xc, yc, color, width, height, framebuffer, fb);
-            return;
-        }
-        draw_triangle_avx_glass(x[i], y[i], x[i + 1], y[i + 1], xc, yc, color, width, height, framebuffer, fb);
+static inline void draw_polygon_avx_glass(Vector2f *arr, int n, uint32_t color, short width, short height, uint32_t *framebuffer, uint8_t *fb){
+    for (int i = 1; i < n; i++){
+        draw_triangle_avx_glass(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, arr[0].x, arr[0].y, color, width, height, framebuffer, fb);
     }
+    draw_triangle_avx_glass(arr[n].x, arr[n].y, arr[1].x, arr[1].y, arr[0].x, arr[0].y, color, width, height, framebuffer, fb);
 }
 
-static inline void draw_polygon_avx_refraction(float *x, float *y, short n, int xc, int yc, uint32_t color, short *arr, short width, short height, uint32_t *framebuffer, uint32_t *buffer){
-    for (short i = 0; i < n; i++){
-        if (i == (n - 1)){
-            draw_triangle_avx_refraction(x[i], y[i], x[0], y[0], xc, yc, color, arr, width, height, framebuffer, buffer);
-            return;
-        }
-        draw_triangle_avx_refraction(x[i], y[i], x[i + 1], y[i + 1], xc, yc, color, arr, width, height, framebuffer, buffer);
+static inline void draw_polygon_avx_refraction(Vector2f *arr, int n, uint32_t color, short *arr_ref, short width, short height, uint32_t *framebuffer, uint32_t *buffer){
+    for (int i = 1; i < n; i++){
+        draw_triangle_avx_refraction(arr[i].x, arr[i].y, arr[i + 1].x, arr[i + 1].y, arr[0].x, arr[0].y, color, arr_ref, width, height, framebuffer, buffer);
     }
+    draw_triangle_avx_refraction(arr[n].x, arr[n].y, arr[1].x, arr[1].y, arr[0].x, arr[0].y, color, arr_ref, width, height, framebuffer, buffer);
 }
 
 /* полигоны конец */
@@ -1785,24 +1777,115 @@ static inline void draw_len_string_refraction(int x, int y, wchar_t *text, unsig
 
 /* строки конец */
 
-static inline void is_circle_colission(float *x1, float *y1, float *x2, float *y2, float r1, float r2, float mass1, float mass2){
+static inline int init_elips(int a, int b, int x_c, int y_c, Vector2f *arr) {
+    int max_q_size = a + b + 2;
+
+    Vector2i *q = (Vector2i*)__builtin_alloca(max_q_size * sizeof(Vector2i));
+
+    int x = 0;
+    int y = b;
+
+    long a_2 = a * a;
+    long b_2 = b * b;
+
+    long d1 = b_2 - (a_2 * b) + (a_2 >> 2);
+
+    long dx = (b_2 * x) << 1;
+    long dy = (a_2 * y) << 1;
+
+    int q_count = 0;
+
+    for (; dx < dy; q_count++) {
+        q[q_count] = (Vector2i){x, y};
+
+        if (d1 < 0){
+            x++;
+            dx += b_2 << 1;
+            d1 += dx + b_2;
+        } else {
+            x++;
+            y--;
+            dx += b_2 << 1;
+            dy -= a_2 << 1;
+            d1 += dx - dy + b_2;
+        }
+    }
+
+    long d2 = (b_2 * ((x + 0.5) * (x + 0.5))) + (a_2 * ((y - 1) * (y - 1))) - (a_2 * b_2);
+
+    for (; y >= 0; q_count++){
+        q[q_count] = (Vector2i){x, y};
+
+        if (d2 > 0){
+            y--;
+            dy -= a_2 << 1;
+            d2 += a_2 - dy;
+        } else {
+            x++;
+            y--;
+            dx += b_2 << 1;
+            dy -= a_2 << 1;
+            d2 += dx - dy + a_2;
+        }
+    }
+
+    int idx = 1;
+
+    arr[0] = (Vector2f){(float)x_c, (float)y_c};
+
+    for (int i = 0; i < q_count; i++) {
+        arr[idx].x = (x_c + q[i].x);
+        arr[idx].y = (y_c + q[i].y);
+        idx++;
+    }
+
+    for (int i = q_count - 2; i >= 0; i--) {
+        arr[idx].x = (x_c + q[i].x);
+        arr[idx].y = (y_c - q[i].y);
+        idx++;
+    }
+
+    for (int i = 1; i < q_count; i++) {
+        arr[idx].x = (x_c - q[i].x);
+        arr[idx].y = (y_c - q[i].y);
+        idx++;
+    }
+
+    for (int i = q_count - 2; i > 0; i--) {
+        arr[idx].x = (x_c - q[i].x);
+        arr[idx].y = (y_c + q[i].y);
+        idx++;
+    }
+
+    return idx - 1;
+}
+
+static inline bool is_circle_colission(float *x1, float *y1, float *x2, float *y2, float r1, float r2){
     float x = (*x2 - *x1);
     float y = (*y2 - *y1);
     float lenght = sqrtf(x * x + y * y) + FLT_MIN;
     float len = (r1 + r2 - lenght);
 
-    if (len >= 0.0f){
-        float factor = len * reciprocal(lenght) * reciprocal(mass1 + mass2 + FLT_MIN);
-
-        *x1 -= x * factor * mass2;
-        *y1 -= y * factor * mass2;
-
-        *x2 += x * factor * mass1;
-        *y2 += y * factor * mass1;
-    }
+    if (len >= 0.0f) return true;
+    return false;
 }
 
-static inline void acceleration(Vector2d *speed, const float mass, const Vector2d *max_speed, const Vector2d *f, const Vector2d *move, bool use_g, const double delta_time){
+static inline void circle_colission(float *x1, float *y1, float *x2, float *y2, float r1, float r2, float mass1, float mass2){
+    float x = (*x2 - *x1);
+    float y = (*y2 - *y1);
+    float lenght = sqrtf(x * x + y * y) + FLT_MIN;
+    float len = (r1 + r2 - lenght);
+
+    float factor = len * reciprocal(lenght) * reciprocal(mass1 + mass2 + FLT_MIN);
+
+    *x1 -= x * factor * mass2;
+    *y1 -= y * factor * mass2;
+
+    *x2 += x * factor * mass1;
+    *y2 += y * factor * mass1;
+}
+
+static inline void acceleration(Vector2f *speed, const float mass, const Vector2f *max_speed, const Vector2f *f, const Vector2s *move, bool use_g, const double delta_time){
     speed->x += f->x * move->x * reciprocal(mass) * delta_time;
     speed->y += f->y * move->y * reciprocal(mass) * delta_time;
 
@@ -1828,7 +1911,7 @@ static inline void acceleration(Vector2d *speed, const float mass, const Vector2
     speed->y = fminf(fabsf(speed->y), max_speed->y) * SIGN(speed->y);
 }
 
-static inline Vector2d force_graviti(const Vector2d *loc_1, const Vector2d *loc_2, const float mass_1, const float mass_2){
+static inline Vector2f force_graviti(const Vector2f *loc_1, const Vector2f *loc_2, const float mass_1, const float mass_2){
     float x = (loc_2->x - loc_1->x);
     float y = (loc_2->y - loc_1->y);
     float lenght = x * x + y * y + FLT_MIN;
@@ -1836,9 +1919,97 @@ static inline Vector2d force_graviti(const Vector2d *loc_1, const Vector2d *loc_
 
     lenght = reciprocal(sqrtf(lenght));
 
-    Vector2d f_v = {x * lenght * f, y * lenght * f};
+    Vector2f f_v = {x * lenght * f, y * lenght * f};
 
     return f_v;
 }
+
+static inline Vector2f force_kulon(const Vector2f *loc_1, const Vector2f *loc_2, const float q_1, const float q_2, const float e){
+    float x = (loc_2->x - loc_1->x);
+    float y = (loc_2->y - loc_1->y);
+    float lenght = x * x + y * y + FLT_MIN;
+    float f = (M_K * reciprocal(e)) * (fabsf(q_1) + FLT_MIN) * (fabsf(q_2) + FLT_MIN) * reciprocal(lenght) * SIGN(q_1) * SIGN(q_2) * (-1.0f);
+
+    lenght = reciprocal(sqrtf(lenght));
+
+    Vector2f f_v = {x * lenght * f, y * lenght * f};
+
+    return f_v;
+}
+
+static inline Vector2f force_magnitizm(const Vector2f *loc_1, const Vector2f *loc_2, const float maga_1, const float maga_2){
+    float x = (loc_2->x - loc_1->x);
+    float y = (loc_2->y - loc_1->y);
+    float lenght = x * x + y * y + FLT_MIN;
+    float f = (3.0f * M_MAGNITIC * reciprocal(2.0f * M_PI) * (maga_1 * maga_2 * reciprocal(lenght * lenght)));
+
+    lenght = reciprocal(sqrtf(lenght));
+
+    Vector2f f_v = {x * lenght * f, y * lenght * f};
+
+    return f_v;
+}
+
+static inline void Vector2f_add_(Vector2f *a, Vector2f *b){
+    a->x += b->x;
+    a->y += b->y;
+}
+
+static inline void Vector2s_add_(Vector2s *a, Vector2s *b){
+    a->x += b->x;
+    a->y += b->y;
+}
+
+static inline void render_mandelbrot(int width, int height, uint32_t *pixel_buffer) {
+    // Настройки границ фрактала (в этих пределах живет Мандельброт)
+    float x_min = -2.0f, x_max = 0.5f;
+    float y_min = -1.25f, y_max = 1.25f;
+
+    // Максимальное количество итераций (чем больше, тем выше детализация у границ)
+    int max_iterations = 100;
+
+    // Проходим по каждому пикселю буфера
+    for (int screen_y = 0; screen_y < height; screen_y++) {
+        for (int screen_x = 0; screen_x < width; screen_x++) {
+
+            // 1. Переводим координаты экрана в комплексные координаты (C = cr + i*ci)
+            float cr = x_min + ((float)screen_x / width) * (x_max - x_min);
+            float ci = y_min + ((float)screen_y / height) * (y_max - y_min);
+
+            // Начальная точка Z_0 = 0
+            float zr = 0.0f;
+            float zi = 0.0f;
+
+            int iteration = 0;
+
+            // 2. Основной цикл фрактала: Z = Z^2 + C
+            // Математически: (zr + i*zi)^2 = zr^2 - zi^2 + 2*i*zr*zi
+            while ((zr * zr + zi * zi <= 4.0f) && (iteration < max_iterations)) {
+                float temp = zr * zr - zi * zi + cr;
+                zi = 10.0f * zr * zi + ci;
+                zr = temp;
+                iteration++;
+            }
+
+            // 3. Раскраска пикселя на основе количества пройденных итераций
+            uint32_t color;
+            if (iteration == max_iterations) {
+                // Точка принадлежит множеству (внутренняя часть фрактала) — красим в черный
+                color = 0xFF000000;
+            } else {
+                // Точка улетела в бесконечность — красим в зависимости от скорости "улета"
+                // Простая градиентная раскраска (зелено-синие оттенки)
+                uint8_t r = (iteration * 5) % 256;
+                uint8_t g = (iteration * 9) % 256;
+                uint8_t b = (iteration * 13) % 256;
+                color = (0xFF << 24) | (r << 16) | (g << 8) | b;
+            }
+
+            // 4. Записываем цвет в буфер пикселей
+            pixel_buffer[screen_y * width + screen_x] = color;
+        }
+    }
+}
+
 
 #endif // CORE_H

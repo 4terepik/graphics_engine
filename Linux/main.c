@@ -3,6 +3,7 @@
 #include <X11/Xutil.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <alsa/asoundlib.h>
@@ -274,29 +275,24 @@ int main(void) {
 
     /* создаем обьекты для графики */
 
-    short move_x, move_y, rot, mouse_x, mouse_y;
+    short rot;
 
     uint8_t *fb = calloc(sizeof(uint8_t), SCREEN_WIDTH * SCREEN_HEIGHT);
 
     // Rect player_1 = {900, 150, {0, 0, 0, 0}, {0, 0, 0, 0}, 200, 200, alpha_writer(0xbb0505, 0.5f), 100.0f, {3, 10}};
     // Rect player_2 = {900, 150, {400, 0, 0, 0}, {500, 0, 0, 0}, 200, 200, alpha_writer(0xbb0500, 0.5f), 100.0f, {3, 10}};
 
-    Circle player_1 = {{0, 0}, 1, {100, 100}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 10.2f, {900, 900}};
-    // Circle player_2 = {{0, 0}, 1, {500, 5400}, 5000, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1000000000000000000.2f, {900, 900}};
-    Circle player_2 = {{0, 0}, 1, {500, 400}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1000000000000000000.2f, {900, 900}};
-
-    // int n = 100;
-    // float *arr_x = (float *)malloc((n + 1) * sizeof(float));
-    // float *arr_y = (float *)malloc((n + 1) * sizeof(float));
-
-    // arr_x[n] = 500.0f;
-    // arr_y[n] = 400.0f;
-    // init_poligon(arr_x, arr_y, n, arr_x[n], arr_y[n], 100);
+    Circle player_1 = {{0, 0}, 1, {100, 100}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 10.2f, {900, 900}, {0, 0}, 1};
+    // Circle player_2 = {{0, 0}, 1, {500, 5400}, 5000, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1e+21f, {900, 900}, {0, 0}};
+    Circle player_2 = {{0, 0}, 1, {500, 400}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 9e+17f, {900, 900}, {0, 0}, -1};
 
     // init_rect(&player_1);
     // init_rect(&player_2);
 
-    // Circle player_1 = {500, 200, 100, 100, 50, 0xbb0505};
+    // int a = 100;
+    // int b = 70;
+    // Vector2f *elips = (Vector2f *)malloc(sizeof(Vector2f) * ((a + b) << 2));
+    // int n_elips = init_elips(a, b, 500, 500, elips);
 
     Text fps_text = {{0, 0}, 2, {10, 10}, L"FPS:", alpha_writer(0x2dc100, 0.5f), 8, {0, 0}};
 
@@ -304,7 +300,7 @@ int main(void) {
 
     /* инициализирум счетчик фпс */
     const double fps = 180.0;
-    const double physics_fps = 60.0;
+    const double physics_fps = 120.0;
 
     double last_frame_time = get_time_in_seconds();
     double delta_time = 0.0f;
@@ -317,7 +313,8 @@ int main(void) {
     const double target_frame_time = 1.0 / fps;
     const double physics_target_frame_time = 1.0 / physics_fps;
 
-    Vector2d f_keys = {18000.5f, 18000.5f};
+    Vector2f f_keys = {18000.5f, 18000.5f};
+    Vector2s mouse_loc;
 
     // WavHeader my_header = {0};
     // short *sound_data = load_wav("Linux/2D/музон.wav", &my_header);
@@ -469,8 +466,7 @@ int main(void) {
             }
 
             if (event.type == MotionNotify){
-                mouse_x = event.xmotion.x;
-                mouse_y = event.xmotion.y;
+                mouse_loc = (Vector2s){event.xmotion.x, event.xmotion.y};
             }
 
             if (event.type == ButtonPress){
@@ -482,53 +478,50 @@ int main(void) {
             }
         }
 
-        /* сам игровой цикл */
-        Vector2d move = {keys[XK_Right] - keys[XK_Left], keys[XK_Down] - keys[XK_Up]};
+        player_1.move = (Vector2s){keys[XK_Right] - keys[XK_Left], keys[XK_Down] - keys[XK_Up]};
 
         rot = (keys[XK_d] - keys[XK_a]) + (keys[XK_D] - keys[XK_A]);
 
-        Vector2d old_speed_1 = player_1.speed;
+        // player_2.move = (Vector2s){(keys[XK_D] || keys[XK_d]) - (keys[XK_A] || keys[XK_a]), (keys[XK_S] || keys[XK_s]) - (keys[XK_W] || keys[XK_w])};
 
-        acceleration(&player_1.speed, player_1.mass, &player_1.max_speed, &f_keys, &move, true, delta_time);
+        /* сам игровой цикл + расчет физики */
+        while (physics_delta_time >= physics_target_frame_time) {
+            // Vector2f f_v = force_graviti(&player_1.loc, &player_2.loc, player_1.mass, player_2.mass);
+            Vector2f f_v = force_kulon(&player_1.loc, &player_2.loc, player_1.q, player_2.q, 5.0f);
 
-        Vector2d f_v = force_graviti(&player_1.loc, &player_2.loc, player_1.mass, player_2.mass);
+            acceleration(&player_1.speed, player_1.mass, &player_1.max_speed, &f_keys, &player_1.move, true, physics_target_frame_time);
+            acceleration(&player_1.speed, player_1.mass, &player_1.max_speed, &f_v, &(Vector2s){1, 1}, false, physics_target_frame_time);
 
-        acceleration(&player_1.speed, player_1.mass, &player_1.max_speed, &f_v, &(Vector2d){1.0f, 1.0f}, false, delta_time);
+            Vector2f d = {player_1.speed.x * physics_target_frame_time, player_1.speed.y * physics_target_frame_time};
 
-        float d_x = (player_1.speed.x + old_speed_1.x) * 0.5f * delta_time, d_y = (player_1.speed.y + old_speed_1.y) * 0.5f * delta_time;
+            acceleration(&player_2.speed, player_2.mass, &player_2.max_speed, &(Vector2f){9e+20f, 9e+20f}, &player_2.move, true, physics_target_frame_time);
+            acceleration(&player_2.speed, player_2.mass, &player_2.max_speed, &f_v, &(Vector2s){-1, -1}, false, physics_target_frame_time);
 
-        move_x = (keys[XK_D] || keys[XK_d]) - (keys[XK_A] || keys[XK_a]);
-        move_y = (keys[XK_S] || keys[XK_s]) - (keys[XK_W] || keys[XK_w]);
+            Vector2f_add_(&player_2.loc, &(Vector2f){player_2.speed.x * physics_target_frame_time, player_2.speed.y * physics_target_frame_time});
 
-        move.x = move_x;
-        move.y = move_y;
+            if (buttons[Button1]){
+                Vector2f_add_(&d, &(Vector2f){mouse_loc.x - player_1.loc.x, mouse_loc.y - player_1.loc.y});
+                // buttons[Button1] = false;
+            }
 
-        // Vector2d old_speed_2 = player_2.speed;
+            // vector_add_scal(player_1.x, 4, d_x);
+            // vector_add_scal(player_1.y, 4, d_y);
 
-        acceleration(&player_2.speed, player_2.mass, &player_2.max_speed, &(Vector2d){90000000000000000.0f, 90000000000000000.0f}, &move, true, delta_time);
-        acceleration(&player_2.speed, player_2.mass, &player_2.max_speed, &f_v, &(Vector2d){-1.0f, -1.0f}, false, delta_time);
+            Vector2f_add_(&player_1.loc, &d);
 
-        player_2.loc.x +=  player_2.speed.x * delta_time;
-        player_2.loc.y +=  player_2.speed.y * delta_time;
+            rot += 0;
+            // if (rot) rotate_polygon(elips, n_elips, (M_PI * reciprocal(180.0f)) * rot * 100 * physics_delta_time);
 
-        if (buttons[Button1]){
-            d_x += mouse_x - player_1.loc.x;
-            d_y += mouse_y - player_1.loc.y;
-            // buttons[Button1] = false;
+            /* обработка столкновений */
+            if (is_circle_colission(&player_1.loc.x, &player_1.loc.y, &player_2.loc.x, &player_2.loc.y, player_1.r, player_2.r)){
+                circle_colission(&player_1.loc.x, &player_1.loc.y, &player_2.loc.x, &player_2.loc.y, player_1.r, player_2.r, player_1.mass, player_2.mass);
+                float q_general = (player_1.q + player_2.q) * 0.5f;
+                player_1.q = q_general;
+                player_2.q = q_general;
+            }
+
+            physics_delta_time -= physics_target_frame_time;
         }
-
-        // vector_add_scal(player_1.x, 4, d_x);
-        // vector_add_scal(player_1.y, 4, d_y);
-
-        player_1.loc.x += d_x;
-        player_1.loc.y += d_y;
-
-        /* обработка столкновений */
-        is_circle_colission(&player_1.loc.x, &player_1.loc.y, &player_2.loc.x, &player_2.loc.y, player_1.r, player_2.r, player_1.mass, player_2.mass);
-
-        rot += 0;
-
-        // if (rot) rotate_polygon(player_1.x, player_1.y, 4, (M_PI * reciprocal(180.0f)) * rot * player_1.deg * delta_time);
 
         if (keys[XK_F11]){
             xev.xclient.data.l[0] = 1;
@@ -557,12 +550,14 @@ int main(void) {
 
             draw_filled_circle_glass(player_2.loc.x, player_2.loc.y, player_2.r, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
-            memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
+            // memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
 
             draw_filled_circle_glass(player_1.loc.x, player_1.loc.y, player_1.r, player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
             memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
             //memcpy_avx_epi32(framebuffer, framebuffer_2, SCREEN_WIDTH * SCREEN_HEIGHT);
+
+            // render_mandelbrot(SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer);
 
             draw_string_glass(fps_text.loc.x, fps_text.loc.y, fps_text.text, fps_text.scale, fps_text.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #13b17c)
 
