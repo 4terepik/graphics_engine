@@ -1,6 +1,7 @@
 #ifndef CORE_H
 #define CORE_H
 
+#include <math.h>
 #include <time.h>
 #include <math.h>
 #include <immintrin.h>
@@ -98,6 +99,7 @@ typedef struct{
     Vector2f speed;
     float scale;
     Vector2f loc;
+    Vector2f screen_loc;
     float r;
     uint32_t color;
     short refraction[2];
@@ -105,6 +107,7 @@ typedef struct{
     Vector2f max_speed;
     Vector2s move;
     float q;
+    float elasticity;
 } Circle;
 
 typedef struct{
@@ -118,6 +121,17 @@ typedef struct{
     float mass;
     Vector2f max_speed;
 } Triangle;
+
+typedef struct {
+    Vector2f loc;
+    Vector2f speed;
+    Vector2f max_speed;
+    float scale;
+    float zoom;
+    float deg;
+    float rad;
+    Vector2s move;
+} Camera;
 
 #pragma pack(push, 1)
 typedef struct {
@@ -1860,9 +1874,9 @@ static inline int init_elips(int a, int b, int x_c, int y_c, Vector2f *arr) {
     return idx - 1;
 }
 
-static inline bool is_circle_colission(float *x1, float *y1, float *x2, float *y2, float r1, float r2){
-    float x = (*x2 - *x1);
-    float y = (*y2 - *y1);
+static inline bool is_circle_colission(Vector2f *loc_1, Vector2f *loc_2, float r1, float r2){
+    float x = (loc_2->x - loc_1->x);
+    float y = (loc_2->y - loc_1->y);
     float lenght = sqrtf(x * x + y * y) + FLT_MIN;
     float len = (r1 + r2 - lenght);
 
@@ -1870,19 +1884,19 @@ static inline bool is_circle_colission(float *x1, float *y1, float *x2, float *y
     return false;
 }
 
-static inline void circle_colission(float *x1, float *y1, float *x2, float *y2, float r1, float r2, float mass1, float mass2){
-    float x = (*x2 - *x1);
-    float y = (*y2 - *y1);
+static inline void circle_colission(Vector2f *loc_1, Vector2f *loc_2, float r1, float r2, float mass1, float mass2){
+    float x = (loc_2->x - loc_1->x);
+    float y = (loc_2->y - loc_1->y);
     float lenght = sqrtf(x * x + y * y) + FLT_MIN;
     float len = (r1 + r2 - lenght);
 
     float factor = len * reciprocal(lenght) * reciprocal(mass1 + mass2 + FLT_MIN);
 
-    *x1 -= x * factor * mass2;
-    *y1 -= y * factor * mass2;
+    loc_1->x -= x * factor * mass2;
+    loc_1->y -= y * factor * mass2;
 
-    *x2 += x * factor * mass1;
-    *y2 += y * factor * mass1;
+    loc_2->x += x * factor * mass1;
+    loc_2->y += y * factor * mass1;
 }
 
 static inline void acceleration(Vector2f *speed, const float mass, const Vector2f *max_speed, const Vector2f *f, const Vector2s *move, bool use_g, const double delta_time){
@@ -1960,56 +1974,117 @@ static inline void Vector2s_add_(Vector2s *a, Vector2s *b){
     a->y += b->y;
 }
 
-static inline void render_mandelbrot(int width, int height, uint32_t *pixel_buffer) {
-    // Настройки границ фрактала (в этих пределах живет Мандельброт)
-    float x_min = -2.0f, x_max = 0.5f;
-    float y_min = -1.25f, y_max = 1.25f;
+// 0.0f <= elasticity <= 1.0f
+// static inline void elasticity(Vector2f v_1, Vector2f v_2, float el_1, float el_2){
+//     float e = (el_1 + el_2) * 0.5f;
 
-    // Максимальное количество итераций (чем больше, тем выше детализация у границ)
-    int max_iterations = 100;
+// }
 
-    // Проходим по каждому пикселю буфера
-    for (int screen_y = 0; screen_y < height; screen_y++) {
-        for (int screen_x = 0; screen_x < width; screen_x++) {
+static inline Vector2f screen_mouse_loc_to_map(Vector2s *mouse_loc, float SCREEN_WIDTH, float SCREEN_HEIGHT, Camera *camera){
+    float m_dx = mouse_loc->x - SCREEN_WIDTH * 0.5f;
+    float m_dy = mouse_loc->y - SCREEN_HEIGHT * 0.5f;
 
-            // 1. Переводим координаты экрана в комплексные координаты (C = cr + i*ci)
-            float cr = x_min + ((float)screen_x / width) * (x_max - x_min);
-            float ci = y_min + ((float)screen_y / height) * (y_max - y_min);
+    float rad = -(M_PI * reciprocal(180.0f)) * camera->rad;
+    float cos_cam = cosf(rad);
+    float sin_cam = sinf(rad);
 
-            // Начальная точка Z_0 = 0
-            float zr = 0.0f;
-            float zi = 0.0f;
+    Vector2f mouse_delt = {m_dx * cos_cam - m_dy * sin_cam, m_dx * sin_cam + m_dy * cos_cam};
 
-            int iteration = 0;
-
-            // 2. Основной цикл фрактала: Z = Z^2 + C
-            // Математически: (zr + i*zi)^2 = zr^2 - zi^2 + 2*i*zr*zi
-            while ((zr * zr + zi * zi <= 4.0f) && (iteration < max_iterations)) {
-                float temp = zr * zr - zi * zi + cr;
-                zi = 10.0f * zr * zi + ci;
-                zr = temp;
-                iteration++;
-            }
-
-            // 3. Раскраска пикселя на основе количества пройденных итераций
-            uint32_t color;
-            if (iteration == max_iterations) {
-                // Точка принадлежит множеству (внутренняя часть фрактала) — красим в черный
-                color = 0xFF000000;
-            } else {
-                // Точка улетела в бесконечность — красим в зависимости от скорости "улета"
-                // Простая градиентная раскраска (зелено-синие оттенки)
-                uint8_t r = (iteration * 5) % 256;
-                uint8_t g = (iteration * 9) % 256;
-                uint8_t b = (iteration * 13) % 256;
-                color = (0xFF << 24) | (r << 16) | (g << 8) | b;
-            }
-
-            // 4. Записываем цвет в буфер пикселей
-            pixel_buffer[screen_y * width + screen_x] = color;
-        }
-    }
+    return (Vector2f){(mouse_delt.x - camera->loc.x), (mouse_delt.y - camera->loc.y)};
 }
 
+static inline void box_blur_2d_uint32_fast(uint32_t* buffer, int width, int height, int radius) {
+    if (radius <= 0) return;
+
+    int window_size = radius * 2 + 1;
+
+    uint64_t scale = ((1ULL << 32) + window_size - 1) / window_size;
+
+    uint32_t* temp_buffer = (uint32_t*)malloc(width * height * sizeof(uint32_t));
+
+    for (int y = 0; y < height; y++) {
+        int row_offset = y * width;
+        uint32_t sum_a = 0, sum_r = 0, sum_g = 0, sum_b = 0;
+
+        for (int i = -radius; i <= radius; i++) {
+            int sample_x = (i < 0) ? 0 : ((i >= width) ? width - 1 : i);
+            uint32_t pixel = buffer[row_offset + sample_x];
+            sum_a += (pixel >> 24) & 0xFF;
+            sum_r += (pixel >> 16) & 0xFF;
+            sum_g += (pixel >> 8) & 0xFF;
+            sum_b += pixel & 0xFF;
+        }
+
+        for (int x = 0; x < width - 1; x++) {
+            uint32_t a = (sum_a * scale) >> 32;
+            uint32_t r = (sum_r * scale) >> 32;
+            uint32_t g = (sum_g * scale) >> 32;
+            uint32_t b = (sum_b * scale) >> 32;
+
+            temp_buffer[row_offset + x] = (a << 24) | (r << 16) | (g << 8) | b;
+
+            int next_x = min(x + radius + 1, width - 1);
+            int prev_x = max(x - radius, 0);
+
+            uint32_t next_pixel = buffer[row_offset + next_x];
+            uint32_t prev_pixel = buffer[row_offset + prev_x];
+
+            sum_a += ((next_pixel >> 24) & 0xFF) - ((prev_pixel >> 24) & 0xFF);
+            sum_r += ((next_pixel >> 16) & 0xFF) - ((prev_pixel >> 16) & 0xFF);
+            sum_g += ((next_pixel >> 8) & 0xFF) - ((prev_pixel >> 8) & 0xFF);
+            sum_b += (next_pixel & 0xFF) - (prev_pixel & 0xFF);
+        }
+    }
+
+    uint32_t* col_sum_a = (uint32_t*)calloc(width, sizeof(uint32_t));
+    uint32_t* col_sum_r = (uint32_t*)calloc(width, sizeof(uint32_t));
+    uint32_t* col_sum_g = (uint32_t*)calloc(width, sizeof(uint32_t));
+    uint32_t* col_sum_b = (uint32_t*)calloc(width, sizeof(uint32_t));
+
+    for (int i = -radius; i <= radius; i++) {
+        int sample_y = (i < 0) ? 0 : ((i >= height) ? height - 1 : i);
+        for (int x = 0; x < width; x++) {
+            uint32_t pixel = temp_buffer[sample_y * width + x];
+            col_sum_a[x] += (pixel >> 24) & 0xFF;
+            col_sum_r[x] += (pixel >> 16) & 0xFF;
+            col_sum_g[x] += (pixel >> 8) & 0xFF;
+            col_sum_b[x] += pixel & 0xFF;
+        }
+    }
+
+    for (int y = 0; y < height; y++) {
+        int row_offset = y * width;
+
+        for (int x = 0; x < width; x++) {
+            uint32_t a = (col_sum_a[x] * scale) >> 32;
+            uint32_t r = (col_sum_r[x] * scale) >> 32;
+            uint32_t g = (col_sum_g[x] * scale) >> 32;
+            uint32_t b = (col_sum_b[x] * scale) >> 32;
+
+            buffer[row_offset + x] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+
+        if (y < height - 1) {
+            int next_y = min(height - 1, y + radius + 1);
+            int prev_y = max(y - radius, 0);
+
+            int next_row = next_y * width;
+            int prev_row = prev_row = prev_y * width;
+
+            for (int x = 0; x < width; x++) {
+                uint32_t next_pixel = temp_buffer[next_row + x];
+                uint32_t prev_pixel = temp_buffer[prev_row + x];
+
+                col_sum_a[x] += ((next_pixel >> 24) & 0xFF) - ((prev_pixel >> 24) & 0xFF);
+                col_sum_r[x] += ((next_pixel >> 16) & 0xFF) - ((prev_pixel >> 16) & 0xFF);
+                col_sum_g[x] += ((next_pixel >> 8) & 0xFF) - ((prev_pixel >> 8) & 0xFF);
+                col_sum_b[x] += (next_pixel & 0xFF) - (prev_pixel & 0xFF);
+            }
+        }
+    }
+
+    free(col_sum_a); free(col_sum_r); free(col_sum_g); free(col_sum_b);
+    free(temp_buffer);
+}
 
 #endif // CORE_H

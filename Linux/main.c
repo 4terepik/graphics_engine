@@ -275,16 +275,16 @@ int main(void) {
 
     /* создаем обьекты для графики */
 
-    short rot;
-
     uint8_t *fb = calloc(sizeof(uint8_t), SCREEN_WIDTH * SCREEN_HEIGHT);
 
     // Rect player_1 = {900, 150, {0, 0, 0, 0}, {0, 0, 0, 0}, 200, 200, alpha_writer(0xbb0505, 0.5f), 100.0f, {3, 10}};
     // Rect player_2 = {900, 150, {400, 0, 0, 0}, {500, 0, 0, 0}, 200, 200, alpha_writer(0xbb0500, 0.5f), 100.0f, {3, 10}};
 
-    Circle player_1 = {{0, 0}, 1, {100, 100}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 10.2f, {900, 900}, {0, 0}, 1};
+    Camera camera = {{0, 0}, {0, 0}, {400, 400}, 1.0f, 1.0f, 100, 0.0f, {0, 0}};
+
+    Circle player_1 = {{0, 0}, 1, {100, 100}, {100, 100}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 9.0f, {900, 900}, {0, 0}, 1, 0.0f};
     // Circle player_2 = {{0, 0}, 1, {500, 5400}, 5000, alpha_writer(0xbb0505, 0.5f), {0, 0}, 1e+21f, {900, 900}, {0, 0}};
-    Circle player_2 = {{0, 0}, 1, {500, 400}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 9e+17f, {900, 900}, {0, 0}, -1};
+    Circle player_2 = {{0, 0}, 1, {500, 400}, {500, 400}, 100, alpha_writer(0xbb0505, 0.5f), {0, 0}, 9.0f, {900, 900}, {0, 0}, -1, 0.0f};
 
     // init_rect(&player_1);
     // init_rect(&player_2);
@@ -295,12 +295,13 @@ int main(void) {
     // int n_elips = init_elips(a, b, 500, 500, elips);
 
     Text fps_text = {{0, 0}, 2, {10, 10}, L"FPS:", alpha_writer(0x2dc100, 0.5f), 8, {0, 0}};
+    Text pos_1_text = {{0, 0}, 2, {10, 30}, L"POS X:   POS Y: ", alpha_writer(0x2dc100, 0.5f), 32, {0, 0}};
 
     //Line simple_line = {10, 10, 100, 150, 500, 0xeedb04};
 
     /* инициализирум счетчик фпс */
-    const double fps = 180.0;
-    const double physics_fps = 120.0;
+    const double fps = 146.0;
+    const double physics_fps = 180.0;
 
     double last_frame_time = get_time_in_seconds();
     double delta_time = 0.0f;
@@ -480,12 +481,20 @@ int main(void) {
 
         player_1.move = (Vector2s){keys[XK_Right] - keys[XK_Left], keys[XK_Down] - keys[XK_Up]};
 
-        rot = (keys[XK_d] - keys[XK_a]) + (keys[XK_D] - keys[XK_A]);
+        short rot = -((keys[XK_Q] - keys[XK_E]) + (keys[XK_q] - keys[XK_e]));
 
-        // player_2.move = (Vector2s){(keys[XK_D] || keys[XK_d]) - (keys[XK_A] || keys[XK_a]), (keys[XK_S] || keys[XK_s]) - (keys[XK_W] || keys[XK_w])};
+        camera.move = (Vector2s){(keys[XK_D] || keys[XK_d]) - (keys[XK_A] || keys[XK_a]), (keys[XK_S] || keys[XK_s]) - (keys[XK_W] || keys[XK_w])};
+
+        short zooming = (keys[XK_Z] - keys[XK_X]) + (keys[XK_z] - keys[XK_x]);
 
         /* сам игровой цикл + расчет физики */
         while (physics_delta_time >= physics_target_frame_time) {
+
+            /* движение камеры */
+            acceleration(&camera.speed, player_1.mass, &camera.max_speed, &f_keys, &camera.move, true, physics_target_frame_time);
+            camera.loc.x += camera.speed.x * physics_delta_time;
+            camera.loc.y += camera.speed.y * physics_delta_time;
+
             // Vector2f f_v = force_graviti(&player_1.loc, &player_2.loc, player_1.mass, player_2.mass);
             Vector2f f_v = force_kulon(&player_1.loc, &player_2.loc, player_1.q, player_2.q, 5.0f);
 
@@ -500,21 +509,41 @@ int main(void) {
             Vector2f_add_(&player_2.loc, &(Vector2f){player_2.speed.x * physics_target_frame_time, player_2.speed.y * physics_target_frame_time});
 
             if (buttons[Button1]){
-                Vector2f_add_(&d, &(Vector2f){mouse_loc.x - player_1.loc.x, mouse_loc.y - player_1.loc.y});
+                Vector2f real_mouse_loc = screen_mouse_loc_to_map(&mouse_loc, SCREEN_WIDTH, SCREEN_HEIGHT, &camera);
+                Vector2f_add_(&d, &(Vector2f){real_mouse_loc.x - player_1.loc.x, real_mouse_loc.y - player_1.loc.y});
                 // buttons[Button1] = false;
             }
 
-            // vector_add_scal(player_1.x, 4, d_x);
-            // vector_add_scal(player_1.y, 4, d_y);
-
             Vector2f_add_(&player_1.loc, &d);
 
-            rot += 0;
-            // if (rot) rotate_polygon(elips, n_elips, (M_PI * reciprocal(180.0f)) * rot * 100 * physics_delta_time);
+            player_1.screen_loc = player_1.loc;
+            player_2.screen_loc = player_2.loc;
+
+            Vector2f_add_(&player_1.screen_loc, &camera.loc);
+            Vector2f_add_(&player_2.screen_loc, &camera.loc);
+
+            if (rot || camera.rad) {
+                camera.rad = fmodf(camera.rad + rot * physics_delta_time * camera.deg, 360.0f);
+
+                Vector2f *arr = (Vector2f*)malloc(3 * sizeof(Vector2f));
+
+                arr[0] = (Vector2f){0.0f, 0.0f};
+                arr[1] = player_1.screen_loc;
+                arr[2] = player_2.screen_loc;
+
+                rotate_polygon(arr, 2, (M_PI * reciprocal(180.0f)) * camera.rad);
+
+                player_1.screen_loc = arr[1];
+                player_2.screen_loc = arr[2];
+
+                free(arr);
+            }
+
+            if(zooming) camera.zoom += physics_delta_time * camera.scale * zooming;
 
             /* обработка столкновений */
-            if (is_circle_colission(&player_1.loc.x, &player_1.loc.y, &player_2.loc.x, &player_2.loc.y, player_1.r, player_2.r)){
-                circle_colission(&player_1.loc.x, &player_1.loc.y, &player_2.loc.x, &player_2.loc.y, player_1.r, player_2.r, player_1.mass, player_2.mass);
+            if (is_circle_colission(&player_1.loc, &player_2.loc, player_1.r, player_2.r)){
+                circle_colission(&player_1.loc, &player_2.loc, player_1.r, player_2.r, player_1.mass, player_2.mass);
                 float q_general = (player_1.q + player_2.q) * 0.5f;
                 player_1.q = q_general;
                 player_2.q = q_general;
@@ -540,6 +569,8 @@ int main(void) {
             keys[XK_F12] = false;
         }
 
+        swprintf(pos_1_text.text, 32, L"POS X: %d  POS Y: %d", (int)player_1.loc.x, (int)player_1.loc.y);
+
         /* отрисовка кадров */
         if (is_buffer_ready[back_buffer_idx]){
             framebuffer = (uint32_t*)x_image[back_buffer_idx]->data;
@@ -548,18 +579,20 @@ int main(void) {
             // clear_screen(0x1A1A2E, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #1A1A2E)
             // memset(framebuffer, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint32_t));
 
-            draw_filled_circle_glass(player_2.loc.x, player_2.loc.y, player_2.r, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
+            draw_filled_circle_glass(player_2.screen_loc.x * camera.zoom + SCREEN_WIDTH * 0.5f, player_2.screen_loc.y * camera.zoom + SCREEN_HEIGHT * 0.5f, player_2.r * camera.zoom, player_2.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
             // memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
 
-            draw_filled_circle_glass(player_1.loc.x, player_1.loc.y, player_1.r, player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
+            draw_filled_circle_glass(player_1.screen_loc.x * camera.zoom + SCREEN_WIDTH * 0.5f, player_1.screen_loc.y * camera.zoom + SCREEN_HEIGHT * 0.5f, player_1.r * camera.zoom, player_1.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer, fb);
 
             memset(fb, 0, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint8_t));
             //memcpy_avx_epi32(framebuffer, framebuffer_2, SCREEN_WIDTH * SCREEN_HEIGHT);
 
-            // render_mandelbrot(SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer);
+            box_blur_2d_uint32_fast(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, 10);
 
             draw_string_glass(fps_text.loc.x, fps_text.loc.y, fps_text.text, fps_text.scale, fps_text.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #13b17c)
+
+            draw_string(pos_1_text.loc.x, pos_1_text.loc.y, pos_1_text.text, pos_1_text.scale, pos_1_text.color, SCREEN_WIDTH, SCREEN_HEIGHT, framebuffer); // (HEX: #13b17c)
 
             is_buffer_ready[back_buffer_idx] = false;
 
